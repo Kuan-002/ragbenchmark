@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PaperPilot · Library</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+  <style>
+    /* Library-specific overrides */
+    body { overflow: auto; }
+    .screen { overflow: auto; }
+
+    .lib-layout { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
+
+    /* Search bar */
+    .lib-search-wrap {
+      display: flex; gap: 10px; margin-bottom: 12px;
+    }
+    .lib-search-input {
+      flex: 1; padding: 10px 16px; border: 1px solid var(--gray-200);
+      border-radius: var(--radius); font-size: 15px; outline: none;
+      transition: border-color .15s;
+    }
+    .lib-search-input:focus { border-color: var(--blue); }
+    .lib-search-btn {
+      padding: 10px 22px; background: var(--blue); color: #fff;
+      border: none; border-radius: var(--radius); font-size: 14px;
+      font-weight: 600; cursor: pointer; transition: background .15s;
+    }
+    .lib-search-btn:hover { background: #1d4ed8; }
+    .lib-search-btn:disabled { background: var(--gray-400); cursor: default; }
+
+    /* Stats bar */
+    .lib-stats { font-size: 13px; color: var(--gray-400); margin-bottom: 24px; }
+
+    /* Answer card */
+    .lib-answer-card {
+      background: #fff; border-radius: var(--radius); box-shadow: var(--shadow);
+      padding: 20px 24px; margin-bottom: 20px;
+    }
+    .lib-answer-meta {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;
+    }
+    .strategy-chip {
+      font-size: 11px; padding: 2px 8px; border-radius: 20px;
+      background: var(--gray-100); color: var(--gray-600); font-weight: 500;
+    }
+    .latency-chip {
+      font-size: 11px; color: var(--gray-400);
+    }
+    .lib-answer-text { font-size: 14px; line-height: 1.7; color: var(--gray-800); }
+
+    /* Low confidence banner */
+    .low-conf-banner {
+      background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px;
+      padding: 8px 14px; font-size: 13px; color: #92400e; margin-bottom: 12px;
+    }
+
+    /* Sources */
+    .lib-sources-toggle {
+      background: none; border: none; cursor: pointer;
+      font-size: 13px; color: var(--blue); margin-top: 12px;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .lib-sources-list { display: none; margin-top: 12px; }
+    .lib-sources-list.open { display: block; }
+
+    .lib-source-item {
+      border: 1px solid var(--gray-200); border-radius: 8px;
+      margin-bottom: 8px; overflow: hidden;
+    }
+    .lib-source-header {
+      display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+      background: var(--gray-50); border-bottom: 1px solid var(--gray-200);
+    }
+    .lib-source-rank {
+      width: 22px; height: 22px; border-radius: 50%; background: var(--blue);
+      color: #fff; font-size: 12px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .lib-source-paper { font-size: 12px; font-weight: 600; color: var(--gray-800); flex: 1; }
+    .lib-source-section { font-size: 12px; color: var(--gray-400); }
+    .lib-source-score { font-size: 11px; color: var(--gray-400); }
+    .table-badge {
+      font-size: 10px; padding: 1px 6px; border-radius: 4px;
+      background: #ede9fe; color: #5b21b6; font-weight: 600;
+    }
+
+    .lib-source-body { padding: 10px 14px; }
+    .lib-source-text { font-size: 13px; line-height: 1.6; color: var(--gray-800); }
+
+    /* Markdown table rendering */
+    .rendered-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+    .rendered-table th, .rendered-table td {
+      border: 1px solid var(--gray-200); padding: 6px 10px; text-align: left;
+    }
+    .rendered-table th { background: var(--gray-50); font-weight: 600; }
+
+    /* Loading skeleton */
+    .lib-skeleton { background: var(--gray-100); border-radius: 4px; height: 14px; margin-bottom: 8px; }
+    .lib-skeleton.wide  { width: 80%; }
+    .lib-skeleton.full  { width: 100%; }
+    .lib-skeleton.short { width: 50%; }
+
+    /* Empty state */
+    .lib-empty { text-align: center; padding: 60px 20px; color: var(--gray-400); }
+    .lib-empty svg { margin-bottom: 16px; }
+    .lib-empty p { font-size: 15px; }
+
+    /* Nav link in header */
+    .nav-link {
+      font-size: 13px; color: var(--gray-600); text-decoration: none;
+      padding: 4px 10px; border-radius: 6px; transition: background .15s;
+    }
+    .nav-link:hover { background: var(--gray-100); }
+    .nav-link.active { color: var(--blue); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="logo">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+        </svg>
+        PaperPilot
+      </div>
+      <nav style="display:flex;gap:4px;">
+        <a href="/" class="nav-link">单篇上传</a>
+        <a href="/library" class="nav-link active">论文库</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="screen">
+    <div class="lib-layout">
+      <div class="lib-search-wrap">
+        <input id="lib-input" class="lib-search-input"
+               placeholder="在论文库中检索，例如：What BLEU score does Transformer achieve on WMT14?"
+               onkeydown="if(event.key==='Enter') doSearch()" />
+        <button id="lib-btn" class="lib-search-btn" onclick="doSearch()">检索</button>
+      </div>
+      <div id="lib-stats" class="lib-stats">加载中…</div>
+      <div id="lib-result"></div>
+    </div>
+  </div>
+
+  <script>
+  // ── Stats ─────────────────────────────────────────────────────────────────
+  async function loadStats() {
+    try {
+      const res  = await fetch('/api/library/stats');
+      if (!res.ok) throw new Error('unavailable');
+      const data = await res.json();
+      document.getElementById('lib-stats').textContent =
+        `共 ${data.n_papers} 篇论文 · ${data.n_chunks.toLocaleString()} 个 chunk`;
+    } catch {
+      document.getElementById('lib-stats').textContent = '论文库未加载';
+    }
+  }
+  loadStats();
+
+  // ── Search ────────────────────────────────────────────────────────────────
+  async function doSearch() {
+    const q    = document.getElementById('lib-input').value.trim();
+    const btn  = document.getElementById('lib-btn');
+    const area = document.getElementById('lib-result');
+    if (!q) return;
+
+    btn.disabled = true;
+    btn.textContent = '检索中…';
+    area.innerHTML = `
+      <div class="lib-answer-card">
+        <div class="lib-skeleton wide"></div>
+        <div class="lib-skeleton full"></div>
+        <div class="lib-skeleton short"></div>
+      </div>`;
+
+    try {
+      const res  = await fetch(`/api/library/search?query=${encodeURIComponent(q)}&top_k=5`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || '检索失败');
+      renderResult(data);
+    } catch (e) {
+      area.innerHTML = `<p style="color:#dc2626;font-size:14px;">错误：${esc(e.message)}</p>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '检索';
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  const TYPE_LABELS = {
+    factual:'事实查询', why_how:'解释性问题',
+    numerical:'数值查询', methodology:'方法论', comparison:'对比分析'
+  };
+  const STRATEGY_LABELS = {
+    single_stage:'单阶段检索', two_stage:'两阶段检索'
+  };
+
+  function renderResult(data) {
+    const area = document.getElementById('lib-result');
+
+    const hintHtml = data.hint
+      ? `<div class="hint-banner" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 14px;font-size:13px;color:#1e40af;margin-bottom:12px;">
+           ${esc(data.hint)}</div>`
+      : '';
+
+    const lowHtml = data.low_confidence
+      ? `<div class="low-conf-banner">
+           ⚠️ 当前结果置信度较低，答案可能在图表、附录或库中未收录的论文中。</div>`
+      : '';
+
+    const srcBadge = data.results.length > 0
+      ? `<button class="lib-sources-toggle" onclick="toggleSrc(this)">
+           ▸ 查看 ${data.results.length} 个来源段落</button>`
+      : '';
+
+    const srcHtml = data.results.map((r, i) => {
+      const isTable  = r.chunk_type === 'table' || r.chunk_type === 'merged_tables';
+      const bodyHtml = isTable
+        ? `<div class="lib-source-body">${renderMarkdownTable(r.text)}</div>`
+        : `<div class="lib-source-body"><div class="lib-source-text">${esc(r.text)}</div></div>`;
+
+      return `<div class="lib-source-item">
+        <div class="lib-source-header">
+          <div class="lib-source-rank">${r.rank}</div>
+          <span class="lib-source-paper">${esc(r.paper_title || r.paper_id || '')}</span>
+          ${isTable ? '<span class="table-badge">表格</span>' : ''}
+          <span class="lib-source-section">${esc(r.section)}</span>
+          <span class="lib-source-score">CE ${r.score.toFixed(2)}</span>
+        </div>
+        ${bodyHtml}
+      </div>`;
+    }).join('');
+
+    const _katexOpts = {
+      delimiters: [
+        { left: '$$', right: '$$', display: true  },
+        { left: '$',  right: '$',  display: false },
+      ],
+      throwOnError: false,
+      errorColor: '#9ca3af',
+    };
+
+    area.innerHTML = `
+      <div class="lib-answer-card">
+        <div class="lib-answer-meta">
+          <span class="query-type-badge badge-${data.query_type}">
+            ${TYPE_LABELS[data.query_type] || data.query_type}
+          </span>
+          <span class="strategy-chip">${STRATEGY_LABELS[data.strategy] || data.strategy}</span>
+          <span class="latency-chip">${data.latency_ms} ms</span>
+        </div>
+        ${hintHtml}
+        ${lowHtml}
+        <div class="lib-answer-text">${renderMarkdown(data.answer)}</div>
+        ${srcBadge}
+        <div class="lib-sources-list">${srcHtml}</div>
+      </div>`;
+
+    // Render LaTeX formulas
+    if (typeof renderMathInElement !== 'undefined') {
+      renderMathInElement(area, _katexOpts);
+    }
+  }
+
+  // ── Markdown table → HTML table ───────────────────────────────────────────
+  function renderMarkdownTable(text) {
+    const lines = text.split('\n');
+    let html = '';
+    let inTable = false;
+    let isHeader = false;
+
+    for (const line of lines) {
+      if (line.trim().startsWith('|')) {
+        if (!inTable) { html += '<table class="rendered-table"><tbody>'; inTable = true; isHeader = true; }
+        if (line.replace(/[\s|:-]/g, '') === '') { isHeader = false; continue; }
+        const cells = line.split('|').filter((_, i, a) => i > 0 && i < a.length - 1);
+        const tag = isHeader ? 'th' : 'td';
+        html += '<tr>' + cells.map(c => `<${tag}>${esc(c.trim())}</${tag}>`).join('') + '</tr>';
+        if (isHeader) isHeader = false;
+      } else {
+        if (inTable) { html += '</tbody></table>'; inTable = false; }
+        html += `<p style="font-size:13px;margin-bottom:4px;">${esc(line)}</p>`;
+      }
+    }
+    if (inTable) html += '</tbody></table>';
+    return html;
+  }
+
+  function toggleSrc(btn) {
+    const list = btn.nextElementSibling;
+    const open = list.classList.toggle('open');
+    btn.textContent = (open ? '▾ ' : '▸ ') + btn.textContent.slice(2);
+  }
+
+  function esc(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function renderMarkdown(s) {
+    return esc(s)
+      .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+      .replace(/`(.+?)`/g,'<code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:13px">$1</code>')
+      .replace(/\[(\d+)\]/g,'<sup style="color:#2563eb;font-weight:600">[$1]</sup>')
+      .replace(/\n/g,'<br>');
+  }
+  </script>
+</body>
+</html>

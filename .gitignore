@@ -1,0 +1,59 @@
+# ── Environment ───────────────────────────────────────────────────────────────
+.env
+*.env.*
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Data & embeddings (too large for git) ─────────────────────────────────────
+data/
+papers/
+*.npy
+*.bin
+
+# ── Pre-built indexes (regenerate with build scripts) ─────────────────────────
+library_index/
+
+# ── Demo papers are committed so others can run without GROBID ────────────────
+# demo_papers/   ← intentionally tracked
+
+# ── Benchmark results & reports ───────────────────────────────────────────────
+data/
+*.json.bak
+results_*.json
+*_results.json
+report.md
+final_report.md
+
+# ── Internal design & requirement docs ────────────────────────────────────────
+BENCHMARK_EXP.md
+paperpilot_web_prd.md
+paperpilot_library_dev.md
+
+# ── Claude Code ───────────────────────────────────────────────────────────────
+.claude/
+
+# ── User feedback log (runtime data) ─────────────────────────────────────────
+data/feedback.jsonl
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log
+.pytest_cache/
+.mypy_cache/

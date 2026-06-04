@@ -1,0 +1,7 @@
+datasets>=2.0
+rank_bm25
+sentence-transformers>=2.2
+numpy>=1.21
+scikit-learn
+openai
+tqdm
