@@ -3,9 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>PaperPilot</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📄</text></svg>">
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text x='50' y='68' text-anchor='middle' font-size='64' font-family='Arial'>P</text></svg>">
+  <link rel="stylesheet" href="/static/style.css?v=en-only-2" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
@@ -25,14 +28,13 @@
         PaperPilot
       </div>
       <nav style="display:flex;gap:4px;align-items:center;">
-        <a href="/" data-i18n="nav.upload" style="font-size:13px;color:#2563eb;font-weight:600;text-decoration:none;padding:4px 10px;border-radius:6px;background:#eff6ff;"></a>
-        <a href="/library" data-i18n="nav.library" style="font-size:13px;color:#4b5563;text-decoration:none;padding:4px 10px;border-radius:6px;transition:background .15s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''"></a>
-        <button id="lang-toggle" onclick="toggleLang()" style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:6px;border:1px solid #d1d5db;background:#fff;cursor:pointer;color:#374151;margin-left:4px;"></button>
+        <a href="/?ui=en-only-2" style="font-size:13px;color:#2563eb;font-weight:600;text-decoration:none;padding:4px 10px;border-radius:6px;background:#eff6ff;">Single Paper</a>
+        <a href="/library?ui=en-only-2" style="font-size:13px;color:#4b5563;text-decoration:none;padding:4px 10px;border-radius:6px;transition:background .15s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background=''">Paper Library</a>
       </nav>
       <div id="mode-toggle" class="mode-toggle hidden">
-        <span class="mode-label" data-i18n="mode.label"></span>
-        <button id="btn-ce"  class="mode-btn active" onclick="setMode('ce')"  data-i18n="mode.ce"></button>
-        <button id="btn-rrf" class="mode-btn"         onclick="setMode('rrf')" data-i18n="mode.rrf"></button>
+        <span class="mode-label">Retrieval</span>
+        <button id="btn-ce"  class="mode-btn active" onclick="setMode('ce')">CE (Precise)</button>
+        <button id="btn-rrf" class="mode-btn"         onclick="setMode('rrf')">RRF (Fast)</button>
       </div>
     </div>
   </header>
@@ -40,12 +42,12 @@
   <!-- Upload screen -->
   <div id="upload-screen" class="screen">
     <div class="upload-card">
-      <h1 data-i18n="upload.title"></h1>
-      <p class="subtitle" data-i18n="upload.subtitle"></p>
+      <h1>Paper Q&amp;A Assistant</h1>
+      <p class="subtitle">Upload an NLP paper and ask questions in natural language. Answers are source-cited.</p>
 
       <div class="tab-bar">
-        <button class="tab active" onclick="switchTab('pdf')"   data-i18n="upload.tabPdf"></button>
-        <button class="tab"        onclick="switchTab('arxiv')" data-i18n="upload.tabArxiv"></button>
+        <button class="tab active" onclick="switchTab('pdf')">Upload PDF</button>
+        <button class="tab"        onclick="switchTab('arxiv')">arXiv ID</button>
       </div>
 
       <!-- PDF upload -->
@@ -56,8 +58,8 @@
             <polyline points="17 8 12 3 7 8"/>
             <line x1="12" y1="3" x2="12" y2="15"/>
           </svg>
-          <p data-i18n="upload.dropHint"></p>
-          <span class="hint-text" data-i18n="upload.dropSub"></span>
+          <p>Click or drag a PDF file here</p>
+          <span class="hint-text">Supports NLP papers in arXiv format</span>
           <input type="file" id="file-input" accept=".pdf" style="display:none" onchange="handleFileSelect(event)" />
         </div>
       </div>
@@ -65,8 +67,8 @@
       <!-- arXiv import -->
       <div id="tab-arxiv" class="tab-panel hidden">
         <div class="arxiv-form">
-          <input type="text" id="arxiv-input" data-i18n-placeholder="upload.arxivPlaceholder" />
-          <button class="btn-primary" onclick="handleArxiv()" data-i18n="upload.arxivBtn"></button>
+          <input type="text" id="arxiv-input" placeholder="e.g. 2310.06825 or https://arxiv.org/abs/2310.06825" />
+          <button class="btn-primary" onclick="handleArxiv()">Import</button>
         </div>
       </div>
 
@@ -74,7 +76,7 @@
 
       <!-- Demo papers -->
       <div id="demo-section" class="demo-section hidden">
-        <div class="demo-divider"><span data-i18n="demo.label"></span></div>
+        <div class="demo-divider"><span>Or try a demo paper</span></div>
         <div id="demo-list" class="demo-list"></div>
       </div>
     </div>
@@ -86,15 +88,15 @@
       <!-- Left: paper info -->
       <aside class="paper-panel">
         <div class="paper-meta">
-          <div class="paper-badge" data-i18n="paper.loaded"></div>
+          <div class="paper-badge">Paper loaded</div>
           <h2 id="paper-title"></h2>
           <p id="paper-abstract" class="abstract-text"></p>
         </div>
         <div class="section-list">
-          <h3 data-i18n="paper.sections"></h3>
+          <h3>Sections</h3>
           <ul id="section-list"></ul>
         </div>
-        <button class="btn-secondary" onclick="resetApp()" data-i18n="paper.change"></button>
+        <button class="btn-secondary" onclick="resetApp()">Change paper</button>
       </aside>
 
       <!-- Right: Q&A -->
@@ -102,7 +104,7 @@
         <div id="qa-history" class="qa-history"></div>
 
         <div class="qa-input-area">
-          <textarea id="question-input" rows="2" data-i18n-placeholder="qa.placeholder"
+          <textarea id="question-input" rows="2" placeholder="Ask a question, e.g.: What architecture does the model use?"
             onkeydown="handleKey(event)"></textarea>
           <button class="btn-primary send-btn" onclick="submitQuestion()">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -111,7 +113,7 @@
             </svg>
           </button>
         </div>
-        <p class="input-hint" data-i18n="qa.hint"></p>
+        <p class="input-hint">Optimized for NLP papers. Enter to send, Shift+Enter for a new line</p>
       </main>
     </div>
   </div>
@@ -119,24 +121,24 @@
   <!-- Feedback modal -->
   <div id="feedback-modal" class="modal hidden">
     <div class="modal-card">
-      <h3 data-i18n="feedback.title"></h3>
-      <p class="modal-desc" data-i18n="feedback.desc"></p>
+      <h3>What went wrong?</h3>
+      <p class="modal-desc">Your feedback helps us improve retrieval quality.</p>
       <div class="modal-btns">
         <button class="btn-modal" onclick="submitFailure('retrieval_failure')">
-          <strong data-i18n="feedback.irrelevant"></strong>
-          <span data-i18n="feedback.irrelevantDesc"></span>
+          <strong>Irrelevant paragraphs</strong>
+          <span>Retrieved content is unrelated to the question.</span>
         </button>
         <button class="btn-modal" onclick="submitFailure('missing_evidence')">
-          <strong data-i18n="feedback.incomplete"></strong>
-          <span data-i18n="feedback.incompleteDesc"></span>
+          <strong>Relevant but incomplete</strong>
+          <span>Found related paragraphs but missing key information.</span>
         </button>
       </div>
-      <button class="btn-text" onclick="closeModal()" data-i18n="feedback.skip"></button>
+      <button class="btn-text" onclick="closeModal()">Skip</button>
     </div>
   </div>
   <div id="modal-backdrop" class="modal-backdrop hidden" onclick="closeModal()"></div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=en-only-2"></script>
   <script>
     function renderMath(el) {
       if (typeof renderMathInElement === 'undefined') return;

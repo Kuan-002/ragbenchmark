@@ -89,6 +89,10 @@ def _merge_table_chunks(table_results: list[dict]) -> dict:
     }
 
 
+def _chunk_has_number(chunk: dict) -> bool:
+    return bool(re.search(r"(?<![A-Za-z])-?\d+(?:\.\d+)?%?", chunk.get("text", "")))
+
+
 class PaperIndex:
     def __init__(self, chunks: list[dict]):
         self.chunks       = chunks
@@ -222,8 +226,36 @@ class PaperIndex:
                 if bm25_tops:
                     results = [bm25_tops[0]] + results[:effective_k - 1]
 
+        # 4c. Comparison: keep at least two evidence chunks and give table
+        #     evidence a chance even when the query is not strictly cross-table.
+        if query_type == "comparison" and not cross_table:
+            has_table = any(r["chunk"].get("chunk_type") == "table" for r in results)
+            if not has_table:
+                bm25_tops = [r for r in self._table_bm25_top(query, k=1) if r["score"] > 0]
+                if bm25_tops:
+                    results = [bm25_tops[0]] + results[:effective_k - 1]
+            if len(results) < 2:
+                seen = {r["chunk"]["chunk_id"] for r in results}
+                for r in all_results:
+                    if r["chunk"]["chunk_id"] not in seen:
+                        results.append(r)
+                        break
+
         # 5. Low-confidence flag
         if results:
-            results[0]["low_confidence"] = results[0]["score"] < _LOW_CONF_THRESHOLD
+            low_confidence = results[0]["score"] < _LOW_CONF_THRESHOLD
+            if query_type == "numerical":
+                low_confidence = low_confidence or not any(
+                    _chunk_has_number(r["chunk"]) for r in results
+                )
+            if query_type == "comparison":
+                if cross_table:
+                    table_like = [
+                        r for r in results
+                        if r["chunk"].get("chunk_type") in {"table", "merged_tables"}
+                    ]
+                    low_confidence = low_confidence or len(table_like) == 0
+                low_confidence = low_confidence or len(results) < 2
+            results[0]["low_confidence"] = low_confidence
 
         return results

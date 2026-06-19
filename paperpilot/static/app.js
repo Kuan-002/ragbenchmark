@@ -10,32 +10,32 @@ const LANGS = {
     'mode.rrf':     'RRF (Fast)',
 
     'upload.title':           'Paper Q&A Assistant',
-    'upload.subtitle':        'Upload an NLP paper and ask questions in natural language — answers are source-cited.',
+    'upload.subtitle':        'Upload an NLP paper and ask questions in natural language. Answers are source-cited.',
     'upload.tabPdf':          'Upload PDF',
     'upload.tabArxiv':        'arXiv ID',
     'upload.dropHint':        'Click or drag a PDF file here',
     'upload.dropSub':         'Supports NLP papers in arXiv format',
     'upload.arxivPlaceholder':'e.g. 2310.06825 or https://arxiv.org/abs/2310.06825',
     'upload.arxivBtn':        'Import',
-    'upload.parsing':         'Parsing {name}…',
-    'upload.downloading':     'Downloading arXiv:{id}…',
-    'upload.loadingDemo':     'Loading demo paper…',
+    'upload.parsing':         'Parsing {name}...',
+    'upload.downloading':     'Downloading arXiv:{id}...',
+    'upload.loadingDemo':     'Loading demo paper...',
     'upload.error':           'Error: ',
 
     'demo.label':    'Or try a demo paper',
-    'demo.loading':  'Loading…',
+    'demo.loading':  'Loading...',
 
     'paper.loaded':   'Paper loaded',
     'paper.sections': 'Sections',
     'paper.change':   'Change paper',
 
     'qa.placeholder': 'Ask a question, e.g.: What architecture does the model use?',
-    'qa.hint':        'Optimized for NLP papers · Enter to send, Shift+Enter for new line',
+    'qa.hint':        'Optimized for NLP papers. Enter to send, Shift+Enter for a new line',
     'qa.sources':     'View {n} source(s)',
     'qa.expand':      'Show full text',
     'qa.helpful':     'Was this answer helpful?',
-    'qa.yes':         '👍 Yes',
-    'qa.no':          '👎 No',
+    'qa.yes':         'Yes',
+    'qa.no':          'No',
     'qa.modeCE':      'CE Precise',
     'qa.modeRRF':     'RRF Fast',
 
@@ -45,7 +45,7 @@ const LANGS = {
     'type.methodology': 'Methodology',
     'type.comparison':  'Comparison',
 
-    'hint.why_how':   'This type of question may require synthesising multiple paragraphs — treat the answer as a reference.',
+    'hint.why_how':   'This type of question may require synthesising multiple paragraphs. Treat the answer as a reference.',
     'hint.numerical': 'Numerical answers may be in tables; retrieval may be incomplete.',
 
     'feedback.title':        'What went wrong?',
@@ -56,63 +56,9 @@ const LANGS = {
     'feedback.incompleteDesc':'Found related paragraphs but missing key information.',
     'feedback.skip':         'Skip',
   },
-  zh: {
-    'nav.upload':   '单篇上传',
-    'nav.library':  '论文库',
-    'mode.label':   '检索模式',
-    'mode.ce':      'CE（精准）',
-    'mode.rrf':     'RRF（快速）',
-
-    'upload.title':           '论文问答助手',
-    'upload.subtitle':        '上传一篇 NLP 论文，用自然语言提问，获得有来源标注的答案。',
-    'upload.tabPdf':          '上传 PDF',
-    'upload.tabArxiv':        'arXiv ID',
-    'upload.dropHint':        '点击或拖拽 PDF 文件到此处',
-    'upload.dropSub':         '支持 arXiv 格式的 NLP 论文',
-    'upload.arxivPlaceholder':'例如 2310.06825 或 https://arxiv.org/abs/2310.06825',
-    'upload.arxivBtn':        '导入论文',
-    'upload.parsing':         '正在解析 {name}…',
-    'upload.downloading':     '正在下载 arXiv:{id}…',
-    'upload.loadingDemo':     '正在加载示例论文…',
-    'upload.error':           '错误：',
-
-    'demo.label':    '或直接体验示例论文',
-    'demo.loading':  '加载中…',
-
-    'paper.loaded':   '已加载论文',
-    'paper.sections': '章节',
-    'paper.change':   '更换论文',
-
-    'qa.placeholder': '输入问题，例如：What architecture does the model use?',
-    'qa.hint':        '当前版本针对 NLP 领域论文优化 · Enter 发送，Shift+Enter 换行',
-    'qa.sources':     '查看 {n} 个来源段落',
-    'qa.expand':      '展开全文',
-    'qa.helpful':     '这个回答对你有帮助吗？',
-    'qa.yes':         '👍 有帮助',
-    'qa.no':          '👎 没帮助',
-    'qa.modeCE':      'CE 精准模式',
-    'qa.modeRRF':     'RRF 快速模式',
-
-    'type.factual':     '事实查询',
-    'type.why_how':     '解释性问题',
-    'type.numerical':   '数值查询',
-    'type.methodology': '方法论',
-    'type.comparison':  '对比分析',
-
-    'hint.why_how':   '此类问题可能需要综合多个段落，答案仅供参考。',
-    'hint.numerical': '数值答案可能在表格中，当前版本检索结果可能不完整。',
-
-    'feedback.title':        '哪里没有帮到你？',
-    'feedback.desc':         '你的反馈帮助我们改进检索质量。',
-    'feedback.irrelevant':   '段落不相关',
-    'feedback.irrelevantDesc':'检索到的内容与问题无关。',
-    'feedback.incomplete':   '段落相关但不完整',
-    'feedback.incompleteDesc':'找到了相关段落，但答案信息不够。',
-    'feedback.skip':         '跳过',
-  },
 };
 
-let _lang = localStorage.getItem('pp-lang') || 'en';
+let _lang = 'en';
 
 function t(key, vars = {}) {
   let s = (LANGS[_lang] || LANGS.en)[key] || key;
@@ -121,20 +67,25 @@ function t(key, vars = {}) {
 }
 
 function applyLang() {
-  document.documentElement.lang = _lang === 'zh' ? 'zh-CN' : 'en';
+  document.documentElement.lang = 'en';
   document.querySelectorAll('[data-i18n]').forEach(el => {
     el.textContent = t(el.dataset.i18n);
   });
   document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
     el.placeholder = t(el.dataset.i18nPlaceholder);
   });
-  const btn = document.getElementById('lang-toggle');
-  if (btn) btn.textContent = _lang === 'zh' ? 'EN' : '中';
+  document.querySelectorAll('a[href="/library"], a[href^="/library?"]').forEach(el => {
+    el.textContent = 'Paper Library';
+    el.setAttribute('href', '/library?ui=en-only-2');
+  });
+  document.querySelectorAll('a[href="/"], a[href^="/?"]').forEach(el => {
+    el.textContent = 'Single Paper';
+    el.setAttribute('href', '/?ui=en-only-2');
+  });
 }
 
 function toggleLang() {
-  _lang = _lang === 'zh' ? 'en' : 'zh';
-  localStorage.setItem('pp-lang', _lang);
+  _lang = 'en';
   applyLang();
 }
 
@@ -325,7 +276,7 @@ function renderAnswer(card, data, question, turnId) {
   let hintHtml = '';
   if (data.hint) {
     const hintText = t(data.hint) !== data.hint ? t(data.hint) : data.hint;
-    hintHtml = `<div class="hint-banner">⚠️ ${escHtml(hintText)}</div>`;
+    hintHtml = `<div class="hint-banner">${escHtml(hintText)}</div>`;
   }
 
   let sourcesHtml = data.sources.map((s, i) => {

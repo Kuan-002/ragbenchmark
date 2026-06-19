@@ -6,9 +6,9 @@ _DEMO_DIR = Path("demo_papers")
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Query, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 
 # Load .env
@@ -23,9 +23,9 @@ if _env.exists():
 from paperpilot.core.indexer       import load_models, PaperIndex
 from paperpilot.core.library_index import LibraryIndex
 from paperpilot.core.parser        import parse_pdf, parse_arxiv
-from paperpilot.core.classifier    import classify_query, get_hint
+from paperpilot.core.classifier    import get_hint
 from paperpilot.core.generator     import generate_answer
-from paperpilot.core.router        import route_cross_table
+from paperpilot.core.router        import route_query
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("paperpilot")
@@ -76,18 +76,32 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="PaperPilot", lifespan=lifespan)
 
+
+@app.middleware("http")
+async def no_store_ui_assets(request, call_next):
+    response = await call_next(request)
+    if request.url.path in {"/", "/library"} or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 # ── Static files ───────────────────────────────────────────────────────────────
 _static = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(_static)), name="static")
 
 
 @app.get("/")
-def root():
+def root(request: Request):
+    if not request.url.query:
+        return RedirectResponse("/?ui=en-only-2", status_code=307)
     return FileResponse(str(_static / "index.html"))
 
 
 @app.get("/library")
-def library_page():
+def library_page(request: Request):
+    if not request.url.query:
+        return RedirectResponse("/library?ui=en-only-2", status_code=307)
     return FileResponse(str(_static / "library.html"))
 
 
@@ -159,24 +173,25 @@ async def query(req: QueryRequest):
     if not question:
         raise HTTPException(400, "Empty question")
 
-    query_type  = classify_query(question)
-    hint        = get_hint(query_type)
     llm_client  = _get_llm_client()
-    cross_table = route_cross_table(question, llm_client=llm_client)
+    query_plan  = route_query(question, llm_client=llm_client)
+    query_type  = query_plan.query_type
+    hint        = get_hint(query_type)
 
     if req.mode == "rrf":
         retrieved = index.retrieve_rrf(question, top_k=req.top_k)
     else:
         retrieved = index.retrieve_ce(question, top_k=req.top_k,
-                                      cross_table=cross_table,
+                                      cross_table=query_plan.cross_table,
                                       query_type=query_type)
 
-    answer         = generate_answer(question, retrieved)
+    answer         = generate_answer(question, retrieved, query_plan.to_dict())
     low_confidence = bool(retrieved[0].get("low_confidence", False)) if retrieved else True
 
     return {
         "question":       question,
         "query_type":     query_type,
+        "query_plan":     query_plan.to_dict(),
         "hint":           hint,
         "answer":         answer,
         "sources":        _fmt_sources(retrieved),
@@ -279,14 +294,17 @@ async def library_search(
     if not query.strip():
         raise HTTPException(400, "Empty query")
 
-    query_type = classify_query(query)
-    hint       = get_hint(query_type)
     llm_client = _get_llm_client()
+    query_plan = route_query(query, llm_client=llm_client)
+    query_type = query_plan.query_type
+    hint       = get_hint(query_type)
 
-    result     = lib.search(query, top_k=top_k, llm_client=llm_client, query_type=query_type)
+    result     = lib.search(query, top_k=top_k, llm_client=llm_client,
+                            query_type=query_type,
+                            cross_table=query_plan.cross_table)
     retrieved  = result["results"]
 
-    answer         = generate_answer(query, retrieved)
+    answer         = generate_answer(query, retrieved, query_plan.to_dict())
     low_confidence = bool(retrieved[0].get("low_confidence", False)) if retrieved else True
 
     sources = []
@@ -298,6 +316,7 @@ async def library_search(
     return {
         "query":          query,
         "query_type":     query_type,
+        "query_plan":     query_plan.to_dict(),
         "hint":           hint,
         "strategy":       result["strategy"],
         "answer":         answer,

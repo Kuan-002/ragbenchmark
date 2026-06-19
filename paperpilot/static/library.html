@@ -1,25 +1,20 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PaperPilot · Library</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
-  <link rel="stylesheet" href="/static/style.css" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>PaperPilot Library</title>
+  <link rel="stylesheet" href="/static/style.css?v=en-only-2" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
   <style>
-    /* Library-specific overrides */
-    body { overflow: auto; }
-    .screen { overflow: auto; }
-
+    body, .screen { overflow: auto; }
     .lib-layout { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
-
-    /* Search bar */
-    .lib-search-wrap {
-      display: flex; gap: 10px; margin-bottom: 12px;
-    }
+    .lib-search-wrap { display: flex; gap: 10px; margin-bottom: 12px; }
     .lib-search-input {
       flex: 1; padding: 10px 16px; border: 1px solid var(--gray-200);
       border-radius: var(--radius); font-size: 15px; outline: none;
@@ -33,11 +28,7 @@
     }
     .lib-search-btn:hover { background: #1d4ed8; }
     .lib-search-btn:disabled { background: var(--gray-400); cursor: default; }
-
-    /* Stats bar */
     .lib-stats { font-size: 13px; color: var(--gray-400); margin-bottom: 24px; }
-
-    /* Answer card */
     .lib-answer-card {
       background: #fff; border-radius: var(--radius); box-shadow: var(--shadow);
       padding: 20px 24px; margin-bottom: 20px;
@@ -49,18 +40,12 @@
       font-size: 11px; padding: 2px 8px; border-radius: 20px;
       background: var(--gray-100); color: var(--gray-600); font-weight: 500;
     }
-    .latency-chip {
-      font-size: 11px; color: var(--gray-400);
-    }
+    .latency-chip { font-size: 11px; color: var(--gray-400); }
     .lib-answer-text { font-size: 14px; line-height: 1.7; color: var(--gray-800); }
-
-    /* Low confidence banner */
     .low-conf-banner {
       background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px;
       padding: 8px 14px; font-size: 13px; color: #92400e; margin-bottom: 12px;
     }
-
-    /* Sources */
     .lib-sources-toggle {
       background: none; border: none; cursor: pointer;
       font-size: 13px; color: var(--blue); margin-top: 12px;
@@ -68,7 +53,6 @@
     }
     .lib-sources-list { display: none; margin-top: 12px; }
     .lib-sources-list.open { display: block; }
-
     .lib-source-item {
       border: 1px solid var(--gray-200); border-radius: 8px;
       margin-bottom: 8px; overflow: hidden;
@@ -89,29 +73,17 @@
       font-size: 10px; padding: 1px 6px; border-radius: 4px;
       background: #ede9fe; color: #5b21b6; font-weight: 600;
     }
-
     .lib-source-body { padding: 10px 14px; }
     .lib-source-text { font-size: 13px; line-height: 1.6; color: var(--gray-800); }
-
-    /* Markdown table rendering */
     .rendered-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0; }
     .rendered-table th, .rendered-table td {
       border: 1px solid var(--gray-200); padding: 6px 10px; text-align: left;
     }
     .rendered-table th { background: var(--gray-50); font-weight: 600; }
-
-    /* Loading skeleton */
     .lib-skeleton { background: var(--gray-100); border-radius: 4px; height: 14px; margin-bottom: 8px; }
-    .lib-skeleton.wide  { width: 80%; }
-    .lib-skeleton.full  { width: 100%; }
+    .lib-skeleton.wide { width: 80%; }
+    .lib-skeleton.full { width: 100%; }
     .lib-skeleton.short { width: 50%; }
-
-    /* Empty state */
-    .lib-empty { text-align: center; padding: 60px 20px; color: var(--gray-400); }
-    .lib-empty svg { margin-bottom: 16px; }
-    .lib-empty p { font-size: 15px; }
-
-    /* Nav link in header */
     .nav-link {
       font-size: 13px; color: var(--gray-600); text-decoration: none;
       padding: 4px 10px; border-radius: 6px; transition: background .15s;
@@ -131,8 +103,8 @@
         PaperPilot
       </div>
       <nav style="display:flex;gap:4px;">
-        <a href="/" class="nav-link">单篇上传</a>
-        <a href="/library" class="nav-link active">论文库</a>
+        <a href="/?ui=en-only-2" class="nav-link">Single Paper</a>
+        <a href="/library?ui=en-only-2" class="nav-link active">Paper Library</a>
       </nav>
     </div>
   </header>
@@ -141,39 +113,37 @@
     <div class="lib-layout">
       <div class="lib-search-wrap">
         <input id="lib-input" class="lib-search-input"
-               placeholder="在论文库中检索，例如：What BLEU score does Transformer achieve on WMT14?"
+               placeholder="Search the paper library, e.g. Compare different BERT models"
                onkeydown="if(event.key==='Enter') doSearch()" />
-        <button id="lib-btn" class="lib-search-btn" onclick="doSearch()">检索</button>
+        <button id="lib-btn" class="lib-search-btn" onclick="doSearch()">Search</button>
       </div>
-      <div id="lib-stats" class="lib-stats">加载中…</div>
+      <div id="lib-stats" class="lib-stats">Loading...</div>
       <div id="lib-result"></div>
     </div>
   </div>
 
   <script>
-  // ── Stats ─────────────────────────────────────────────────────────────────
   async function loadStats() {
     try {
-      const res  = await fetch('/api/library/stats');
+      const res = await fetch('/api/library/stats');
       if (!res.ok) throw new Error('unavailable');
       const data = await res.json();
       document.getElementById('lib-stats').textContent =
-        `共 ${data.n_papers} 篇论文 · ${data.n_chunks.toLocaleString()} 个 chunk`;
+        `${data.n_papers} papers - ${data.n_chunks.toLocaleString()} chunks`;
     } catch {
-      document.getElementById('lib-stats').textContent = '论文库未加载';
+      document.getElementById('lib-stats').textContent = 'Paper library is not loaded';
     }
   }
   loadStats();
 
-  // ── Search ────────────────────────────────────────────────────────────────
   async function doSearch() {
-    const q    = document.getElementById('lib-input').value.trim();
-    const btn  = document.getElementById('lib-btn');
+    const q = document.getElementById('lib-input').value.trim();
+    const btn = document.getElementById('lib-btn');
     const area = document.getElementById('lib-result');
     if (!q) return;
 
     btn.disabled = true;
-    btn.textContent = '检索中…';
+    btn.textContent = 'Searching...';
     area.innerHTML = `
       <div class="lib-answer-card">
         <div class="lib-skeleton wide"></div>
@@ -182,71 +152,58 @@
       </div>`;
 
     try {
-      const res  = await fetch(`/api/library/search?query=${encodeURIComponent(q)}&top_k=5`);
+      const res = await fetch(`/api/library/search?query=${encodeURIComponent(q)}&top_k=5`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || '检索失败');
+      if (!res.ok) throw new Error(data.detail || 'Search failed');
       renderResult(data);
     } catch (e) {
-      area.innerHTML = `<p style="color:#dc2626;font-size:14px;">错误：${esc(e.message)}</p>`;
+      area.innerHTML = `<p style="color:#dc2626;font-size:14px;">Error: ${esc(e.message)}</p>`;
     } finally {
       btn.disabled = false;
-      btn.textContent = '检索';
+      btn.textContent = 'Search';
     }
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
   const TYPE_LABELS = {
-    factual:'事实查询', why_how:'解释性问题',
-    numerical:'数值查询', methodology:'方法论', comparison:'对比分析'
+    factual: 'Factual',
+    why_how: 'Explanatory',
+    numerical: 'Numerical',
+    methodology: 'Methodology',
+    comparison: 'Comparison',
   };
   const STRATEGY_LABELS = {
-    single_stage:'单阶段检索', two_stage:'两阶段检索'
+    single_stage: 'Single-stage retrieval',
+    two_stage: 'Two-stage retrieval',
   };
 
   function renderResult(data) {
     const area = document.getElementById('lib-result');
-
     const hintHtml = data.hint
       ? `<div class="hint-banner" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 14px;font-size:13px;color:#1e40af;margin-bottom:12px;">
            ${esc(data.hint)}</div>`
       : '';
-
     const lowHtml = data.low_confidence
-      ? `<div class="low-conf-banner">
-           ⚠️ 当前结果置信度较低，答案可能在图表、附录或库中未收录的论文中。</div>`
+      ? `<div class="low-conf-banner">Low-confidence result. The answer may be in tables, appendices, or papers not included in the library.</div>`
       : '';
-
     const srcBadge = data.results.length > 0
-      ? `<button class="lib-sources-toggle" onclick="toggleSrc(this)">
-           ▸ 查看 ${data.results.length} 个来源段落</button>`
+      ? `<button class="lib-sources-toggle" onclick="toggleSrc(this)">Show ${data.results.length} source passage(s)</button>`
       : '';
-
-    const srcHtml = data.results.map((r, i) => {
-      const isTable  = r.chunk_type === 'table' || r.chunk_type === 'merged_tables';
+    const srcHtml = data.results.map(r => {
+      const isTable = r.chunk_type === 'table' || r.chunk_type === 'merged_tables';
       const bodyHtml = isTable
         ? `<div class="lib-source-body">${renderMarkdownTable(r.text)}</div>`
         : `<div class="lib-source-body"><div class="lib-source-text">${esc(r.text)}</div></div>`;
-
       return `<div class="lib-source-item">
         <div class="lib-source-header">
           <div class="lib-source-rank">${r.rank}</div>
           <span class="lib-source-paper">${esc(r.paper_title || r.paper_id || '')}</span>
-          ${isTable ? '<span class="table-badge">表格</span>' : ''}
+          ${isTable ? '<span class="table-badge">Table</span>' : ''}
           <span class="lib-source-section">${esc(r.section)}</span>
-          <span class="lib-source-score">CE ${r.score.toFixed(2)}</span>
+          <span class="lib-source-score">CE ${Number(r.score).toFixed(2)}</span>
         </div>
         ${bodyHtml}
       </div>`;
     }).join('');
-
-    const _katexOpts = {
-      delimiters: [
-        { left: '$$', right: '$$', display: true  },
-        { left: '$',  right: '$',  display: false },
-      ],
-      throwOnError: false,
-      errorColor: '#9ca3af',
-    };
 
     area.innerHTML = `
       <div class="lib-answer-card">
@@ -264,29 +221,43 @@
         <div class="lib-sources-list">${srcHtml}</div>
       </div>`;
 
-    // Render LaTeX formulas
     if (typeof renderMathInElement !== 'undefined') {
-      renderMathInElement(area, _katexOpts);
+      renderMathInElement(area, {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '$', right: '$', display: false },
+        ],
+        throwOnError: false,
+        errorColor: '#9ca3af',
+      });
     }
   }
 
-  // ── Markdown table → HTML table ───────────────────────────────────────────
   function renderMarkdownTable(text) {
     const lines = text.split('\n');
     let html = '';
     let inTable = false;
     let isHeader = false;
-
     for (const line of lines) {
       if (line.trim().startsWith('|')) {
-        if (!inTable) { html += '<table class="rendered-table"><tbody>'; inTable = true; isHeader = true; }
-        if (line.replace(/[\s|:-]/g, '') === '') { isHeader = false; continue; }
+        if (!inTable) {
+          html += '<table class="rendered-table"><tbody>';
+          inTable = true;
+          isHeader = true;
+        }
+        if (line.replace(/[\s|:-]/g, '') === '') {
+          isHeader = false;
+          continue;
+        }
         const cells = line.split('|').filter((_, i, a) => i > 0 && i < a.length - 1);
         const tag = isHeader ? 'th' : 'td';
         html += '<tr>' + cells.map(c => `<${tag}>${esc(c.trim())}</${tag}>`).join('') + '</tr>';
         if (isHeader) isHeader = false;
       } else {
-        if (inTable) { html += '</tbody></table>'; inTable = false; }
+        if (inTable) {
+          html += '</tbody></table>';
+          inTable = false;
+        }
         html += `<p style="font-size:13px;margin-bottom:4px;">${esc(line)}</p>`;
       }
     }
@@ -297,19 +268,21 @@
   function toggleSrc(btn) {
     const list = btn.nextElementSibling;
     const open = list.classList.toggle('open');
-    btn.textContent = (open ? '▾ ' : '▸ ') + btn.textContent.slice(2);
+    const count = list.querySelectorAll('.lib-source-item').length;
+    btn.textContent = `${open ? 'Hide' : 'Show'} ${count} source passage(s)`;
   }
 
   function esc(s) {
-    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
-      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
+
   function renderMarkdown(s) {
     return esc(s)
-      .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
-      .replace(/`(.+?)`/g,'<code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:13px">$1</code>')
-      .replace(/\[(\d+)\]/g,'<sup style="color:#2563eb;font-weight:600">[$1]</sup>')
-      .replace(/\n/g,'<br>');
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`(.+?)`/g, '<code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:13px">$1</code>')
+      .replace(/\[(\d+)\]/g, '<sup style="color:#2563eb;font-weight:600">[$1]</sup>')
+      .replace(/\n/g, '<br>');
   }
   </script>
 </body>
