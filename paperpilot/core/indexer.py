@@ -29,6 +29,7 @@ from rank_bm25 import BM25Okapi
 from sentence_transformers import CrossEncoder
 
 from paperpilot.core.classifier import is_yes_no_question
+from paperpilot.core.query_rewrite import query_variants
 
 _CE_MODEL           = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 _LOW_CONF_THRESHOLD = 0.0
@@ -91,6 +92,19 @@ def _merge_table_chunks(table_results: list[dict]) -> dict:
 
 def _chunk_has_number(chunk: dict) -> bool:
     return bool(re.search(r"(?<![A-Za-z])-?\d+(?:\.\d+)?%?", chunk.get("text", "")))
+
+
+def _dedupe_results(groups: list[list[dict]]) -> list[dict]:
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for group in groups:
+        for row in group:
+            cid = row["chunk"].get("chunk_id")
+            if not cid or cid in seen:
+                continue
+            seen.add(cid)
+            rows.append(row)
+    return rows
 
 
 class PaperIndex:
@@ -259,3 +273,45 @@ class PaperIndex:
             results[0]["low_confidence"] = low_confidence
 
         return results
+
+    def retrieve_multi_query_ce(self, query: str, query_plan: dict,
+                                top_k: int = 5) -> list[dict]:
+        """Intent-gated multi-query BM25 pools followed by CE reranking."""
+        variants = query_variants(query, query_plan)
+        if len(variants) == 1:
+            return self.retrieve_ce(
+                query,
+                top_k=top_k,
+                cross_table=query_plan.get("cross_table", False),
+                query_type=query_plan.get("query_type", "factual"),
+            )
+
+        per_query_pool = max(20, min(len(self.chunks), top_k * 8))
+        pools = [self._bm25_top(variant, per_query_pool) for variant in variants]
+        candidates = _dedupe_results(pools)
+        if not candidates:
+            return []
+
+        pairs = [(query, row["chunk"]["text"]) for row in candidates]
+        ce_scores = _ce_model.predict(pairs)
+        reranked = sorted(zip(candidates, ce_scores), key=lambda x: x[1], reverse=True)
+        results = [{"chunk": row["chunk"], "score": float(score)} for row, score in reranked]
+
+        if query_plan.get("query_type") == "methodology":
+            for row in results:
+                if _METHOD_SECTION_RE.search(row["chunk"].get("section", "")):
+                    row["score"] += _METHOD_BOOST
+            results.sort(key=lambda x: x["score"], reverse=True)
+
+        results = _deduplicate_sections(results, _MAX_SAME_SECTION)[:max(top_k, _WHY_HOW_TOP_K)]
+
+        if query_plan.get("query_type") == "numerical":
+            has_table = any(row["chunk"].get("chunk_type") == "table" for row in results)
+            if not has_table:
+                table_rows = self._table_bm25_top(query, k=1)
+                if table_rows:
+                    results = [table_rows[0]] + results[:top_k - 1]
+
+        if results:
+            results[0]["low_confidence"] = results[0]["score"] < _LOW_CONF_THRESHOLD
+        return results[:top_k]

@@ -22,10 +22,11 @@ if _env.exists():
 
 from paperpilot.core.indexer       import load_models, PaperIndex
 from paperpilot.core.library_index import LibraryIndex
-from paperpilot.core.parser        import parse_pdf, parse_arxiv
+from paperpilot.core.parser        import parse_pdf
 from paperpilot.core.classifier    import get_hint
 from paperpilot.core.generator     import generate_answer
 from paperpilot.core.router        import route_query
+from paperpilot.core.agentic_rag   import run_agentic_rag
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("paperpilot")
@@ -45,9 +46,12 @@ def _get_llm_client():
     api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("DEEPSEEK_API_KEY")
     if not api_key:
         return None
+    base_url = os.environ.get("OPENAI_BASE_URL")
+    if not base_url and os.environ.get("DEEPSEEK_API_KEY"):
+        base_url = "https://api.deepseek.com"
     return openai.OpenAI(
         api_key=api_key,
-        base_url=os.environ.get("OPENAI_BASE_URL") or None,
+        base_url=base_url or None,
     )
 
 
@@ -94,7 +98,7 @@ app.mount("/static", StaticFiles(directory=str(_static)), name="static")
 @app.get("/")
 def root(request: Request):
     if not request.url.query:
-        return RedirectResponse("/?ui=en-only-2", status_code=307)
+        return RedirectResponse("/?ui=agentic-demo-9", status_code=307)
     return FileResponse(str(_static / "index.html"))
 
 
@@ -119,6 +123,7 @@ async def upload_pdf(file: UploadFile = File(...)):
 
     session_id = str(uuid.uuid4())
     log.info(f"Building index for session {session_id} ({len(chunks)} chunks)…")
+    _stamp_session_chunks(chunks, metadata, session_id)
     index = PaperIndex(chunks)
     sessions[session_id] = {"metadata": metadata, "index": index}
     log.info(f"Index ready: {session_id}")
@@ -132,33 +137,10 @@ async def upload_pdf(file: UploadFile = File(...)):
     }
 
 
-@app.post("/api/upload/arxiv")
-async def upload_arxiv(arxiv_id: str = Form(...)):
-    try:
-        metadata, chunks = parse_arxiv(arxiv_id)
-    except ValueError as e:
-        raise HTTPException(422, str(e))
-    except Exception as e:
-        raise HTTPException(500, f"Download error: {e}")
-
-    session_id = str(uuid.uuid4())
-    log.info(f"Building index for arXiv {arxiv_id} ({len(chunks)} chunks)…")
-    index = PaperIndex(chunks)
-    sessions[session_id] = {"metadata": metadata, "index": index}
-
-    return {
-        "session_id": session_id,
-        "title":      metadata["title"],
-        "abstract":   metadata["abstract"],
-        "num_chunks": len(chunks),
-        "sections":   list(dict.fromkeys(c["section"] for c in chunks)),
-    }
-
-
 class QueryRequest(BaseModel):
     session_id: str
     question:   str
-    mode:       str = "ce"
+    mode:       str = "agentic"
     top_k:      int = 5
 
 
@@ -178,24 +160,80 @@ async def query(req: QueryRequest):
     query_type  = query_plan.query_type
     hint        = get_hint(query_type)
 
-    if req.mode == "rrf":
-        retrieved = index.retrieve_rrf(question, top_k=req.top_k)
-    else:
+    mode = req.mode.lower().strip()
+    if mode in {"agentic", "agentic_rag", "agentic-rag"}:
+        if llm_client is None:
+            raise HTTPException(
+                400,
+                "Agentic-RAG requires OPENAI_API_KEY or DEEPSEEK_API_KEY.",
+            )
+
+        plan_dict = query_plan.to_dict()
+
+        def retrieve_fn(search_query: str, top_k: int) -> list[dict]:
+            search_type = plan_dict.get("query_type", query_type)
+            if search_type in {"comparison", "why_how", "methodology"}:
+                return index.retrieve_multi_query_ce(search_query, plan_dict, top_k=top_k)
+            return index.retrieve_ce(
+                search_query,
+                top_k=top_k,
+                cross_table=plan_dict.get("cross_table", False),
+                query_type=search_type,
+            )
+
+        neighbor_fn = _make_neighbor_fn(index)
+        agent_result = run_agentic_rag(
+            question,
+            plan_dict,
+            retrieve_fn,
+            llm_client,
+            top_k=req.top_k,
+            neighbor_fn=neighbor_fn,
+            max_steps=7,
+        )
+        retrieved = agent_result["retrieved"]
+        answer = agent_result["answer"]
+        response_mode = "agentic"
+        method_label = "Agentic-RAG"
+        agent_trace = _fmt_agent_trace(agent_result.get("rounds", []))
+    elif mode in {"rrf_ce", "traditional", "ce", "rrf"}:
+        # Single-paper demo path uses the project's established BM25 candidate
+        # retrieval plus CrossEncoder reranking path.
         retrieved = index.retrieve_ce(question, top_k=req.top_k,
                                       cross_table=query_plan.cross_table,
                                       query_type=query_type)
+        answer = generate_answer(question, retrieved, query_plan.to_dict())
+        response_mode = "rrf_ce"
+        method_label = "Traditional BM25+CE"
+        agent_trace = []
+    else:
+        raise HTTPException(400, f"Unsupported mode: {req.mode}")
 
-    answer         = generate_answer(question, retrieved, query_plan.to_dict())
     low_confidence = bool(retrieved[0].get("low_confidence", False)) if retrieved else True
+    expected_title = session.get("metadata", {}).get("title", "")
+    mismatched = [
+        r["chunk"].get("chunk_id", "")
+        for r in retrieved
+        if expected_title and r["chunk"].get("paper_title") not in {"", expected_title}
+    ]
+    if mismatched:
+        log.warning(
+            "Retrieved chunks from unexpected paper for session %s: %s",
+            req.session_id,
+            mismatched,
+        )
 
     return {
         "question":       question,
+        "paper_title":    session.get("metadata", {}).get("title", ""),
         "query_type":     query_type,
         "query_plan":     query_plan.to_dict(),
         "hint":           hint,
         "answer":         answer,
         "sources":        _fmt_sources(retrieved),
-        "mode":           req.mode,
+        "mode":           response_mode,
+        "method_label":   method_label,
+        "agent_trace":    agent_trace,
         "low_confidence": low_confidence,
     }
 
@@ -231,13 +269,16 @@ async def load_demo_paper(paper_key: str = Form(...)):
     except Exception as e:
         raise HTTPException(500, f"Failed to read demo paper: {e}")
 
-    metadata = data.get("metadata", {})
+    metadata = dict(data.get("metadata", {}))
+    if data.get("display_name"):
+        metadata["title"] = data["display_name"]
     chunks   = data.get("chunks", [])
     if not chunks:
         raise HTTPException(422, "Demo paper has no chunks")
 
     session_id = str(uuid.uuid4())
     log.info(f"Loading demo '{paper_key}' into session {session_id} ({len(chunks)} chunks)")
+    _stamp_session_chunks(chunks, metadata, session_id, paper_key=paper_key)
     index = PaperIndex(chunks)
     sessions[session_id] = {"metadata": metadata, "index": index}
 
@@ -257,6 +298,10 @@ class FeedbackRequest(BaseModel):
     question:     str
     helpful:      bool
     failure_type: str | None = None
+    mode:         str | None = None
+    query_type:   str | None = None
+    answer:       str | None = None
+    retrieved_chunk_ids: list[str] = []
 
 
 @app.post("/api/feedback")
@@ -267,6 +312,10 @@ async def feedback(req: FeedbackRequest):
         "question":     req.question,
         "helpful":      req.helpful,
         "failure_type": req.failure_type,
+        "mode":         req.mode,
+        "query_type":   req.query_type,
+        "answer":       req.answer,
+        "retrieved_chunk_ids": req.retrieved_chunk_ids,
     }
     with open(FEEDBACK_LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -303,8 +352,8 @@ async def library_search(
                             query_type=query_type,
                             cross_table=query_plan.cross_table)
     retrieved  = result["results"]
+    answer = generate_answer(query, retrieved, query_plan.to_dict())
 
-    answer         = generate_answer(query, retrieved, query_plan.to_dict())
     low_confidence = bool(retrieved[0].get("low_confidence", False)) if retrieved else True
 
     sources = []
@@ -319,6 +368,7 @@ async def library_search(
         "query_plan":     query_plan.to_dict(),
         "hint":           hint,
         "strategy":       result["strategy"],
+        "mode":           "ce",
         "answer":         answer,
         "results":        sources,
         "low_confidence": low_confidence,
@@ -340,15 +390,113 @@ async def library_stats():
 
 # ── Shared helper ──────────────────────────────────────────────────────────────
 
+def _stamp_session_chunks(chunks: list[dict], metadata: dict,
+                          session_id: str, paper_key: str | None = None) -> None:
+    title = (
+        metadata.get("title")
+        or metadata.get("paper_title")
+        or paper_key
+        or "current paper"
+    )
+    paper_id = paper_key or metadata.get("paper_id") or session_id
+    for chunk in chunks:
+        original_id = chunk.get("chunk_id", "")
+        chunk.setdefault("original_chunk_id", original_id)
+        chunk["paper_title"] = title
+        chunk["paper_id"] = paper_id
+        if original_id and not str(original_id).startswith(f"{paper_id}:"):
+            chunk["chunk_id"] = f"{paper_id}:{original_id}"
+
+
+def _make_neighbor_fn(index: PaperIndex):
+    positions = {
+        chunk.get("chunk_id"): i
+        for i, chunk in enumerate(index.chunks)
+        if chunk.get("chunk_id")
+    }
+
+    def neighbor_fn(chunk_id: str, window: int = 1) -> list[dict]:
+        if chunk_id not in positions:
+            return []
+        pos = positions[chunk_id]
+        width = max(1, window)
+        start = max(0, pos - width)
+        end = min(len(index.chunks), pos + width + 1)
+        rows = []
+        for i in range(start, end):
+            chunk = index.chunks[i]
+            if chunk.get("chunk_id") == chunk_id:
+                continue
+            rows.append({"chunk": chunk, "score": -abs(i - pos) / 100.0})
+        return rows
+
+    return neighbor_fn
+
+
+def _fmt_agent_trace(rounds: list[dict]) -> list[dict]:
+    trace = []
+    for round_record in rounds:
+        calls = []
+        for result in round_record.get("tool_results", []):
+            output = result.get("output", {}) or {}
+            evidence_status = output.get("evidence_status", {}) or {}
+            calls.append({
+                "tool_name": result.get("tool_name", ""),
+                "reason": result.get("args", {}).get("reason", ""),
+                "observation": _compact_observation(result.get("tool_name", ""), output),
+                "added_chunk_ids": output.get("added_chunk_ids", []),
+                "evidence_count": evidence_status.get("evidence_count"),
+                "suggested_next_actions": output.get("suggested_next_actions", [])[:3],
+            })
+        trace.append({
+            "round": round_record.get("round"),
+            "available_tools": round_record.get("available_tools", []),
+            "calls": calls,
+            "evidence_before": round_record.get("evidence_chunk_ids_before", []),
+            "evidence_after": round_record.get("evidence_chunk_ids_after", []),
+        })
+    return trace
+
+
+def _compact_observation(tool_name: str, output: dict) -> str:
+    if not output.get("ok", False):
+        return output.get("error", "Tool call failed.")
+    if tool_name.startswith("retrieve"):
+        added = len(output.get("added_chunk_ids", []))
+        return f"Retrieved evidence and added {added} new chunk(s)."
+    if tool_name == "rewrite_query":
+        return f"Generated {len(output.get('rewrites', []))} rewrite(s)."
+    if tool_name == "decompose_question":
+        return f"Generated {len(output.get('subqueries', []))} subquery/subqueries."
+    if tool_name == "list_neighbor_chunks":
+        return f"Added {len(output.get('added_chunk_ids', []))} neighboring chunk(s)."
+    if tool_name == "extract_table_data":
+        return f"Extracted {output.get('tables_found', 0)} table(s)."
+    if tool_name == "inspect_context":
+        return "Evidence appears sufficient." if output.get("sufficient") else "Evidence gaps remain."
+    if tool_name == "verify_answer_support":
+        return (
+            "Candidate answer verified against evidence."
+            if output.get("verified")
+            else f"{output.get('unsupported_claim_count', 0)} claim(s) still unsupported."
+        )
+    if tool_name == "finish":
+        return output.get("reason", "Agent stopped.")
+    return "Tool completed."
+
+
 def _fmt_sources(retrieved: list[dict]) -> list[dict]:
     return [
         {
             "rank":       i + 1,
             "chunk_id":   r["chunk"]["chunk_id"],
             "section":    r["chunk"]["section"],
+            "paper_title": r["chunk"].get("paper_title", ""),
+            "paper_id":    r["chunk"].get("paper_id", ""),
             "text":       r["chunk"]["text"],
             "score":      round(r["score"], 4),
             "chunk_type": r["chunk"].get("chunk_type", "paragraph"),
+            "numeric_facts": r.get("numeric_facts", []),
         }
         for i, r in enumerate(retrieved)
     ]

@@ -39,6 +39,16 @@ def _get_answer_type(ans):
     return "unknown"
 
 
+def _answer_text(ans):
+    if ans["yes_no"] is not None:
+        return "yes" if ans["yes_no"] else "no"
+    if ans["extractive_spans"]:
+        return "; ".join(ans["extractive_spans"])
+    if ans["free_form_answer"]:
+        return ans["free_form_answer"]
+    return ""
+
+
 def extract_answerable_queries(papers):
     queries = []
     for paper in papers:
@@ -47,22 +57,34 @@ def extract_answerable_queries(papers):
             question = qa["question"]
             if not qa["answers"]:
                 continue
-            # take first annotator's answer
-            ans = qa["answers"][0]["answer"]
-            if ans["unanswerable"]:
+            answer_records = [
+                a["answer"] for a in qa["answers"]
+                if a.get("answer") and not a["answer"]["unanswerable"]
+            ]
+            if not answer_records:
                 continue
-            evidence = ans["evidence"]
+
+            evidence = []
+            reference_answers = []
+            for ans in answer_records:
+                evidence.extend(ans.get("evidence") or [])
+                answer_text = _answer_text(ans)
+                if answer_text and answer_text not in reference_answers:
+                    reference_answers.append(answer_text)
             if not evidence:
                 continue
+
             text_evidence = [e for e in evidence if not e.startswith("FLOAT SELECTED")]
             if not text_evidence:
                 continue
+            first_answer = answer_records[0]
             queries.append({
                 "qid": f"{paper_id}__{qa['question_id']}",
                 "paper_id": paper_id,
                 "question": question,
-                "evidence": text_evidence,
-                "answer_type": _get_answer_type(ans),
+                "evidence": list(dict.fromkeys(text_evidence)),
+                "reference_answer": " | ".join(reference_answers[:3]),
+                "answer_type": _get_answer_type(first_answer),
                 "nlp_background": qa.get("nlp_background"),
                 "topic_background": qa.get("topic_background"),
             })

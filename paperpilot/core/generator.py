@@ -3,10 +3,15 @@ import re
 import os
 import openai
 
+from paperpilot.core.numeric_reasoner import numeric_reasoning_notes
+
 _SYSTEM = """You are PaperPilot, a research assistant specializing in NLP papers.
 Answer the user's question using ONLY the provided sources below.
 Answer in English unless the user explicitly asks for another language.
-Be concise (2-4 sentences). Cite sources as [1], [2], etc.
+Write a useful interview/demo answer, not a terse abstract. Cite sources as [1], [2], etc.
+For conceptual or methodology questions, explain the mechanism, why it matters, and how the
+parts connect. Prefer 2-4 compact paragraphs or a short structured list when that makes the
+answer easier to inspect. Do not pad with generic background.
 When a source is a table, read the column headers and row values carefully \
 before making any numerical comparisons or calculations.
 If the sources do not contain enough information, say so explicitly."""
@@ -18,7 +23,9 @@ _SOURCE_MERGED = "[{i}] (Tables for joint comparison — {caption})\n{text}"
 _POLICY_TEXT = {
     "numeric_with_units": (
         "Answer with the exact number and unit/metric when present. "
-        "If a calculation or comparison is needed, show the arithmetic briefly."
+        "If a calculation or comparison is needed, show the arithmetic briefly. "
+        "For experimental-results questions, prioritize headline benchmark metrics "
+        "and reported table values over hyperparameter or decoding settings."
     ),
     "structured_comparison": (
         "Compare both sides explicitly. Use evidence for each side; if one side "
@@ -30,12 +37,17 @@ _POLICY_TEXT = {
         "Start with Yes, No, or Not enough information, then give the cited evidence."
     ),
     "explanatory_synthesis": (
-        "Synthesize across the relevant sources instead of summarizing one passage."
+        "Synthesize across the relevant sources instead of summarizing one passage. "
+        "Explain the causal or design rationale, then connect it back to the paper's method or result."
     ),
     "method_steps": (
-        "Describe the method or architecture as ordered steps/components when possible."
+        "Describe the method or architecture as ordered steps/components when possible. "
+        "Name each component, its role, and how it interacts with the other components."
     ),
-    "concise_cited": "Give a concise cited answer.",
+    "concise_cited": (
+        "Give a direct cited answer. If the question asks how or why, include enough detail "
+        "for a reader to understand the mechanism without opening the paper."
+    ),
 }
 
 _USER_TMPL = """Question: {question}
@@ -54,6 +66,17 @@ Evidence quality:
 
 Sources:
 {sources}
+
+Answer requirements:
+- Start with the direct answer in the first sentence.
+- Then give the necessary explanation, mechanism, or evidence chain.
+- For contribution/summary questions, identify the paper's proposed method or claim; do not describe prior work, baselines, or criticized limitations as the paper's contribution.
+- Treat phrases like "previously", "traditional", "recurrent neural networks", "prior work", and "limitations" as background unless the source explicitly says the paper proposes them.
+- For architecture questions, separate components and roles.
+- For comparison questions, explicitly cover each side.
+- For numerical questions, include exact values and units when present.
+- Use citations throughout; every important factual claim should be grounded.
+- If evidence is incomplete, say exactly what is missing.
 
 Answer:"""
 
@@ -81,35 +104,13 @@ def _numeric_text(chunk: dict) -> str:
 
 
 def _table_numeric_notes(question: str, retrieved: list[dict], query_plan: dict | None) -> str:
-    wants_numeric = (query_plan or {}).get("query_type") == "numerical"
-    wants_calc = bool((query_plan or {}).get("needs_calculation"))
-    if not wants_numeric and not wants_calc:
-        return "None."
-
-    notes: list[str] = []
-    for i, r in enumerate(retrieved, 1):
-        chunk = r["chunk"]
-        if chunk.get("chunk_type") not in {"table", "merged_tables"}:
-            continue
-        values = _extract_numbers(_numeric_text(chunk))
-        if not values:
-            continue
-        notes.append(
-            f"Source [{i}] contains {len(values)} numeric values; "
-            f"min={min(values):g}, max={max(values):g}."
-        )
-
-    if not notes:
-        return "No numeric values were extracted from retrieved tables."
-
-    q = question.lower()
-    if any(term in q for term in ["difference", "gap", "improv", "increase", "decrease", "higher", "lower"]):
-        notes.append("If comparing two values, subtract the smaller relevant value from the larger relevant value.")
-    if any(term in q for term in ["highest", "best", "maximum", "largest"]):
-        notes.append("The answer likely needs the row/entry associated with the maximum relevant value, not only the value.")
-    if any(term in q for term in ["lowest", "worst", "minimum", "smallest"]):
-        notes.append("The answer likely needs the row/entry associated with the minimum relevant value, not only the value.")
-    return "\n".join(notes)
+    notes, facts = numeric_reasoning_notes(question, retrieved, query_plan)
+    for result in retrieved:
+        chunk_id = result["chunk"].get("chunk_id", "")
+        result["numeric_facts"] = [
+            fact for fact in facts if fact.get("chunk_id") == chunk_id
+        ][:12]
+    return notes
 
 
 def _policy_block(query_plan: dict | None) -> tuple[str, str]:
@@ -204,6 +205,6 @@ def generate_answer(question: str, retrieved: list[dict],
             )},
         ],
         temperature=0.2,
-        max_tokens=400,
+        max_tokens=850,
     )
     return resp.choices[0].message.content.strip()

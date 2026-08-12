@@ -10,10 +10,11 @@ Redis with a short TTL; for the single-paper web app this is sufficient.
 """
 import json
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from functools import lru_cache
 
 from paperpilot.core.classifier import classify_query, is_yes_no_question
+from paperpilot.core.router_model import predict_query_type
 
 _CROSS_TABLE_PROMPT_SYSTEM = (
     "You are a query classifier for a research paper Q&A system.\n"
@@ -51,6 +52,34 @@ Guidelines:
 - For numerical calculations, set needs_calculation true and include must_find_numeric_value.
 """
 
+_RETRIEVAL_PLANNER_PROMPT_SYSTEM = """You are the retrieval planner for a RAG system over scientific papers.
+Return JSON only. No markdown.
+
+Schema:
+{
+  "query_type": "numerical|comparison|why_how|methodology|factual",
+  "cross_table": boolean,
+  "is_yes_no": boolean,
+  "evidence_need": "single_chunk|multi_chunk_synthesis|method_section|table_or_numeric_sentence|two_sided_evidence|two_tables|supporting_and_contrary_evidence",
+  "source_preference": ["paragraph"|"table"|"figure_caption"],
+  "answer_style": "concise_cited|numeric_with_units|structured_comparison|yes_no_then_evidence|explanatory_synthesis|method_steps",
+  "confidence_checks": string[],
+  "comparison_entities": string[],
+  "needs_calculation": boolean,
+  "retrieval_strategy": "standard|fusion|hyde|decompose",
+  "rewrite_queries": string[],
+  "hyde_query": string
+}
+
+Planner rules:
+- Use standard for direct single-fact questions.
+- Use fusion for why/how, comparison, methodology, and ambiguous questions.
+- Use hyde when the question is abstract and likely suffers vocabulary mismatch.
+- Use decompose when the question asks for multiple entities, multiple criteria, or a comparison.
+- rewrite_queries should be 2-4 short search queries, not answers.
+- hyde_query should be a concise hypothetical relevant passage, not a final answer.
+"""
+
 _CROSS_TABLE_FALLBACK_RE = re.compile(
     r"(?i)\b(compared?\s+to|versus|vs\.?|higher\s+than|lower\s+than|"
     r"better\s+than|worse\s+than|outperform\w*|more\s+than|less\s+than|"
@@ -72,7 +101,8 @@ _SYNTHESIS_RE = re.compile(
 
 _FIGURE_RE = re.compile(r"(?i)\b(figure|fig\.?|plot|diagram|chart)\b|图|图表")
 _TABLE_RE = re.compile(
-    r"(?i)\b(table|score|bleu|rouge|f1|accuracy|precision|recall|result)\b"
+    r"(?i)\b(table|score|bleu|rouge|f1|accuracy|precision|recall|result|results|"
+    r"experimental\s+results?|key\s+results?|main\s+results?|performance)\b"
     r"|表|分数|准确率|精确率|召回率|结果|表现"
 )
 
@@ -91,6 +121,12 @@ class QueryPlan:
     comparison_entities: list[str] = field(default_factory=list)
     needs_calculation: bool = False
     classifier: str = "rules"
+    route_level: str = "rules"
+    route_confidence: float = 0.0
+    complexity_score: float = 0.0
+    retrieval_strategy: str = "standard"
+    rewrite_queries: list[str] = field(default_factory=list)
+    hyde_query: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -156,6 +192,7 @@ _ANSWER_STYLES = {
     "explanatory_synthesis",
     "method_steps",
 }
+_RETRIEVAL_STRATEGIES = {"standard", "fusion", "hyde", "decompose"}
 
 
 def _json_object(text: str) -> dict:
@@ -187,6 +224,23 @@ def _cached_llm_intent(question: str, model: str, base_url: str | None,
     return _json_object(resp.choices[0].message.content or "")
 
 
+@lru_cache(maxsize=256)
+def _cached_llm_retrieval_plan(question: str, model: str, base_url: str | None,
+                               api_key_hint: str) -> dict:
+    import openai
+    client = openai.OpenAI(api_key=_FULL_KEY, base_url=base_url or None)
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": _RETRIEVAL_PLANNER_PROMPT_SYSTEM},
+            {"role": "user", "content": question},
+        ],
+        temperature=0,
+        max_tokens=700,
+    )
+    return _json_object(resp.choices[0].message.content or "")
+
+
 def _as_bool(value, default: bool) -> bool:
     return value if isinstance(value, bool) else default
 
@@ -206,6 +260,76 @@ def _as_str_list(value, allowed: set[str] | None = None) -> list[str]:
         if item not in out:
             out.append(item)
     return out
+
+
+def _bounded_float(value, default: float) -> float:
+    try:
+        return min(1.0, max(0.0, float(value)))
+    except Exception:
+        return default
+
+
+def _route_complexity(question: str, plan: QueryPlan) -> float:
+    q = question.lower()
+    score = 0.0
+    if plan.query_type in {"why_how", "comparison", "methodology"}:
+        score += 0.35
+    if plan.query_type == "numerical" and plan.needs_calculation:
+        score += 0.35
+    if plan.evidence_need != "single_chunk":
+        score += 0.25
+    if plan.cross_table:
+        score += 0.25
+    if len(q.split()) >= 14:
+        score += 0.15
+    if re.search(r"(?i)\b(and|or|both|across|trade[- ]?off|why|how|compare|difference)\b", q):
+        score += 0.15
+    return min(1.0, score)
+
+
+def _route_confidence(question: str, plan: QueryPlan) -> float:
+    q = question.lower()
+    signals = 0
+    if plan.query_type == "numerical" and (_TABLE_RE.search(question) or _NUMERICAL_REASONING_RE.search(question)):
+        signals += 2
+    elif plan.query_type == "comparison" and _CROSS_TABLE_FALLBACK_RE.search(question):
+        signals += 2
+    elif plan.query_type == "why_how" and _SYNTHESIS_RE.search(question):
+        signals += 2
+    elif plan.query_type == "methodology" and re.search(r"(?i)\b(architect|train|loss|encoder|decoder|attention|method)\b", q):
+        signals += 2
+    elif plan.query_type == "factual":
+        signals += 1
+    if plan.is_yes_no:
+        signals += 1
+    return min(0.95, 0.55 + 0.15 * signals)
+
+
+def _retrieval_strategy(plan: QueryPlan) -> str:
+    if plan.evidence_need in {"two_tables", "two_sided_evidence"}:
+        return "decompose"
+    if plan.query_type in {"why_how", "methodology", "comparison", "numerical"}:
+        return "fusion"
+    return "standard"
+
+
+def _attach_route_metadata(plan: QueryPlan, question: str,
+                           route_level: str, classifier: str | None = None,
+                           confidence: float | None = None,
+                           retrieval_strategy: str | None = None,
+                           rewrite_queries: list[str] | None = None,
+                           hyde_query: str | None = None) -> QueryPlan:
+    complexity = _route_complexity(question, plan)
+    return replace(
+        plan,
+        classifier=classifier or plan.classifier,
+        route_level=route_level,
+        route_confidence=_bounded_float(confidence, _route_confidence(question, plan)),
+        complexity_score=complexity,
+        retrieval_strategy=retrieval_strategy or _retrieval_strategy(plan),
+        rewrite_queries=rewrite_queries if rewrite_queries is not None else plan.rewrite_queries,
+        hyde_query=hyde_query if hyde_query is not None else plan.hyde_query,
+    )
 
 
 def _coerce_llm_plan(raw: dict, fallback: QueryPlan) -> QueryPlan:
@@ -238,6 +362,11 @@ def _coerce_llm_plan(raw: dict, fallback: QueryPlan) -> QueryPlan:
     is_yes_no = _as_bool(raw.get("is_yes_no"), fallback.is_yes_no)
     cross_table = _as_bool(raw.get("cross_table"), fallback.cross_table)
     needs_calculation = _as_bool(raw.get("needs_calculation"), fallback.needs_calculation)
+    retrieval_strategy = raw.get("retrieval_strategy")
+    if retrieval_strategy not in _RETRIEVAL_STRATEGIES:
+        retrieval_strategy = fallback.retrieval_strategy
+    rewrite_queries = _as_str_list(raw.get("rewrite_queries"))[:4]
+    hyde_query = raw.get("hyde_query") if isinstance(raw.get("hyde_query"), str) else ""
 
     if is_yes_no:
         answer_style = "yes_no_then_evidence"
@@ -275,6 +404,12 @@ def _coerce_llm_plan(raw: dict, fallback: QueryPlan) -> QueryPlan:
         comparison_entities=entities,
         needs_calculation=needs_calculation,
         classifier="llm",
+        route_level="large_planner",
+        route_confidence=0.9,
+        complexity_score=fallback.complexity_score,
+        retrieval_strategy=retrieval_strategy,
+        rewrite_queries=rewrite_queries,
+        hyde_query=hyde_query.strip()[:800],
     )
 
 
@@ -364,6 +499,90 @@ def _rule_route_query(question: str, llm_client=None) -> QueryPlan:
     )
 
 
+def _small_model_route_query(question: str, fallback: QueryPlan) -> QueryPlan:
+    """Fast local router layer used before calling a large planner.
+
+    The deterministic rules handle high-precision obvious cases. If the local
+    MiniLM router model is available, it may override a factual rule result only
+    when the semantic label is clearly separated from the runner-up label.
+    """
+    plan = _attach_route_metadata(
+        fallback,
+        question,
+        route_level="small_router",
+        classifier="small_router",
+    )
+    semantic = predict_query_type(question)
+    if semantic is None:
+        return plan
+
+    semantic_label = semantic["label"]
+    semantic_score = float(semantic["score"])
+    semantic_margin = float(semantic["margin"])
+    should_override = (
+        plan.query_type == "factual"
+        and semantic_label != "factual"
+        and semantic_score >= 0.55
+        and semantic_margin >= 0.15
+    )
+    if not should_override:
+        return plan
+
+    semantic_plan = _rule_route_query(question, llm_client=None)
+    semantic_plan = replace(semantic_plan, query_type=semantic_label)
+    semantic_plan = _normalize_plan_for_query_type(semantic_plan)
+    return _attach_route_metadata(
+        semantic_plan,
+        question,
+        route_level="small_router_model",
+        classifier="regex_plus_local_model",
+        confidence=min(0.95, max(plan.route_confidence, semantic_score)),
+    )
+
+
+def _normalize_plan_for_query_type(plan: QueryPlan) -> QueryPlan:
+    if plan.query_type == "numerical":
+        return replace(
+            plan,
+            evidence_need="table_or_numeric_sentence",
+            source_preference=["table", "paragraph"],
+            answer_style="numeric_with_units",
+            confidence_checks=list(dict.fromkeys(plan.confidence_checks + [
+                "must_find_numeric_value",
+                "prefer_table_evidence",
+            ])),
+            needs_calculation=plan.needs_calculation,
+        )
+    if plan.query_type == "comparison":
+        return replace(
+            plan,
+            evidence_need="two_sided_evidence",
+            answer_style="structured_comparison",
+            confidence_checks=list(dict.fromkeys(plan.confidence_checks + [
+                "require_two_sided_evidence",
+            ])),
+        )
+    if plan.query_type == "methodology":
+        return replace(
+            plan,
+            evidence_need="method_section",
+            answer_style="method_steps",
+            confidence_checks=list(dict.fromkeys(plan.confidence_checks + [
+                "prefer_method_sections",
+            ])),
+        )
+    if plan.query_type == "why_how":
+        return replace(
+            plan,
+            evidence_need="multi_chunk_synthesis",
+            answer_style="explanatory_synthesis",
+            confidence_checks=list(dict.fromkeys(plan.confidence_checks + [
+                "synthesize_multiple_chunks",
+            ])),
+        )
+    return plan
+
+
 def route_query(question: str, llm_client=None) -> QueryPlan:
     """Return the full policy plan for this question.
 
@@ -371,8 +590,10 @@ def route_query(question: str, llm_client=None) -> QueryPlan:
     back to deterministic rules on missing credentials, network errors, quota
     errors, or malformed model output.
     """
+    rule_plan = _rule_route_query(question, llm_client=None)
+    small_plan = _small_model_route_query(question, rule_plan)
     if llm_client is None:
-        return _rule_route_query(question, llm_client=None)
+        return small_plan
 
     import os
     global _FULL_KEY
@@ -381,11 +602,21 @@ def route_query(question: str, llm_client=None) -> QueryPlan:
     base_url = os.environ.get("OPENAI_BASE_URL")
     key_hint = _FULL_KEY[:8]
 
-    # Build the fallback without an LLM cross-table call so a successful intent
-    # classification costs one model request, not two.
-    fallback = _rule_route_query(question, llm_client=None)
+    if small_plan.route_confidence >= 0.85 and small_plan.complexity_score < 0.45:
+        return small_plan
+
     try:
-        raw = _cached_llm_intent(question, model, base_url, key_hint)
-        return _coerce_llm_plan(raw, fallback)
+        raw = _cached_llm_retrieval_plan(question, model, base_url, key_hint)
+        plan = _coerce_llm_plan(raw, small_plan)
+        return _attach_route_metadata(
+            plan,
+            question,
+            route_level="large_planner",
+            classifier="llm_planner",
+            confidence=0.9,
+            retrieval_strategy=plan.retrieval_strategy,
+            rewrite_queries=plan.rewrite_queries,
+            hyde_query=plan.hyde_query,
+        )
     except Exception:
-        return _rule_route_query(question, llm_client=llm_client)
+        return small_plan

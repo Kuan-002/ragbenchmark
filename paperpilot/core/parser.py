@@ -29,7 +29,7 @@ def _clean(el) -> str:
 
 # ── Table serialisation ───────────────────────────────────────────────────────
 
-def _extract_table_text(fig_el) -> str | None:
+def _extract_table_data(fig_el) -> tuple[str, list[str], list[list[str]]] | None:
     """Serialise a GROBID <figure type="table"> element to Markdown.
 
     Format:
@@ -51,9 +51,10 @@ def _extract_table_text(fig_el) -> str | None:
     if table_el is None:
         return None
 
-    md_rows:    list[str] = []
-    sep_added              = False
-    prev_was_header        = False
+    md_rows:   list[str]       = []
+    headers:   list[str]       = []
+    body_rows: list[list[str]] = []
+    sep_added                 = False
 
     for row_idx, row in enumerate(table_el.findall(_tei("row"))):
         cells     = row.findall(_tei("cell"))
@@ -70,16 +71,21 @@ def _extract_table_text(fig_el) -> str | None:
         md_rows.append(md_row)
 
         if is_header and not sep_added:
+            headers = cell_vals
             n_cols = max(len(cell_vals), 1)
             md_rows.append("|" + "---|" * n_cols)
             sep_added = True
-        prev_was_header = is_header
+        else:
+            body_rows.append(cell_vals)
 
     if not md_rows:
         return None
 
+    if not headers and body_rows:
+        headers = [f"Column {i + 1}" for i in range(max(len(r) for r in body_rows))]
+
     parts = ([caption] if caption else []) + md_rows
-    return "\n".join(parts)
+    return "\n".join(parts), headers, body_rows
 
 
 def _table_index_text(fig_el, caption: str) -> str:
@@ -122,16 +128,19 @@ def _extract_divs(parent, current_section: str, chunks: list[dict]) -> None:
 
         for fig in div.findall(_tei("figure")):
             if fig.get("type") == "table":
-                text = _extract_table_text(fig)
-                if text:
+                table_data = _extract_table_data(fig)
+                if table_data:
+                    text, columns, rows = table_data
                     head_el = fig.find(_tei("head"))
                     caption = _clean(head_el) if head_el is not None else "Table"
                     chunks.append({
-                        "section":    section,
-                        "text":       text,
-                        "index_text": _table_index_text(fig, caption),
-                        "chunk_type": "table",
-                        "caption":    caption,
+                        "section":       section,
+                        "text":          text,
+                        "index_text":    _table_index_text(fig, caption),
+                        "chunk_type":    "table",
+                        "caption":       caption,
+                        "table_columns": columns,
+                        "table_rows":    rows,
                     })
 
         _extract_divs(div, section, chunks)

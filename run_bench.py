@@ -1,18 +1,15 @@
-"""
-用法:
-  # 完整运行（约 45 分钟，含 LLM judge，需设置 DEEPSEEK_API_KEY）
+"""Run the QASPER RAG benchmark.
+
+Examples:
   python run_bench.py --max-papers 228 --llm-per-type 10
-
-  # 快速验证（无 LLM，约 5 分钟）
   python run_bench.py --max-papers 50 --no-llm
-
-  # 仅重跑报告（已有 results.json）
+  python run_bench.py --max-papers 50 --no-llm --strategies RRF+CE Fusion+CE
   python run_bench.py --from-cache data/results_latest.json
 """
 import argparse
 import os
 
-# Load .env if present
+# Load .env if present.
 _env_path = os.path.join(os.path.dirname(__file__), ".env")
 if os.path.exists(_env_path):
     with open(_env_path) as _f:
@@ -35,6 +32,14 @@ def main():
                         help="LLM judge samples per query type")
     parser.add_argument("--from-cache", type=str, default=None,
                         help="Load cached results JSON and regenerate report only")
+    parser.add_argument("--run-id", type=str, default=None,
+                        help="Optional stable run id under data/runs/")
+    parser.add_argument("--output-root", type=str, default="data/runs",
+                        help="Directory where immutable run artifacts are stored")
+    parser.add_argument("--no-latest", action="store_true",
+                        help="Do not update data/report.md and data/results_latest.json")
+    parser.add_argument("--strategies", nargs="+", default=None,
+                        help="Optional subset, e.g. RRF+CE Fusion+CE")
     args = parser.parse_args()
 
     llm_client = None
@@ -49,7 +54,7 @@ def main():
             model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
             print(f"LLM client initialised: model={model}, base_url={base_url}")
         else:
-            print("No OPENAI_API_KEY / DEEPSEEK_API_KEY found — running without LLM judge.")
+            print("No OPENAI_API_KEY / DEEPSEEK_API_KEY found; running without LLM judge.")
             args.no_llm = True
 
     run(
@@ -57,6 +62,10 @@ def main():
         no_llm=args.no_llm,
         llm_client=llm_client,
         from_cache=args.from_cache,
+        run_id=args.run_id,
+        output_root=args.output_root,
+        preserve_latest=not args.no_latest,
+        strategies_filter=args.strategies,
     )
 
 
